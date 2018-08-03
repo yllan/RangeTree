@@ -187,17 +187,17 @@ class ReduceMemory2DRangeTree {
 
 class CrossLinking2DRangeTree {
     
-    typealias Link = (leftIndex: Int, rightIndex: Int, point: CGPoint)
+    typealias Link = (leftIndex: UInt32, rightIndex: UInt32)
     
     indirect enum Tree {
         case Empty
-        case Node(leftTree: Tree, rightTree: Tree, range: CountableRange<Int>, sortedByY: [Link])
+        case Node(leftTree: Tree, rightTree: Tree, range: CountableRange<Int>, sortedByY: [CGPoint], links: [Link])
         
         static func build(range: CountableRange<Int>, array: [CGPoint]) -> Tree {
             if range.count == 0 {
                 return Tree.Empty
             } else if range.count == 1 {
-                return Tree.Node(leftTree: .Empty, rightTree: .Empty, range: range, sortedByY: [Link(leftIndex: 0, rightIndex: 0, point: array[range.startIndex])])
+                return Tree.Node(leftTree: .Empty, rightTree: .Empty, range: range, sortedByY: [array[range.startIndex]], links: [])
             } else {
                 let lRange = range.prefix(range.count / 2)
                 let rRange = range.suffix(from: lRange.endIndex)
@@ -206,35 +206,32 @@ class CrossLinking2DRangeTree {
                 let rTree = build(range: rRange, array: array)
                 
                 // merging
-                var sortedByY: [Link] = []
+                var sortedByY: [CGPoint] = []
+                var links: [Link] = []
                 switch (lTree, rTree) {
-                case let (.Node(_, _, _, lLinks), .Node(_, _, _, rLinks)):
+                case let (.Node(_, _, _, lPoints, _), .Node(_, _, _, rPoints, _)):
                     var lIdx = 0, rIdx = 0, idx = 0
-                    sortedByY = Array<Link>(repeating: Link(leftIndex: 0, rightIndex: 0, point: .zero), count: lLinks.count + rLinks.count)
-                    
-                    while lIdx < lLinks.count || rIdx < rLinks.count {
-                        if (rIdx == rLinks.count) ||
-                           (lIdx < lLinks.count && lLinks[lIdx].point.y < rLinks[rIdx].point.y)
+                    sortedByY = Array<CGPoint>(repeating: .zero, count: lPoints.count + rPoints.count)
+                    links = Array<Link>(repeating: (0, 0), count: lPoints.count + rPoints.count)
+                    while lIdx < lPoints.count || rIdx < rPoints.count {
+                        links[idx] = (leftIndex: UInt32(lIdx), rightIndex: UInt32(rIdx))
+                        if (rIdx == rPoints.count) ||
+                           (lIdx < lPoints.count && lPoints[lIdx].y < rPoints[rIdx].y)
                         {
-                            sortedByY[idx].leftIndex = lIdx
-                            sortedByY[idx].rightIndex = rIdx
-                            sortedByY[idx].point = lLinks[lIdx].point
+                            sortedByY[idx] = lPoints[lIdx]
                             lIdx += 1
-                            idx += 1
                         } else {
-                            sortedByY[idx].leftIndex = lIdx
-                            sortedByY[idx].rightIndex = rIdx
-                            sortedByY[idx].point = rLinks[rIdx].point
+                            sortedByY[idx] = rPoints[rIdx]
                             rIdx += 1
-                            idx += 1
                         }
+                        idx += 1
                     }
                 default:
                     fatalError("Impossible!")
                     break
                 }
                 
-                return Tree.Node(leftTree: lTree, rightTree: rTree, range: range, sortedByY: sortedByY)
+                return Tree.Node(leftTree: lTree, rightTree: rTree, range: range, sortedByY: sortedByY, links: links)
             }
         }
     }
@@ -255,11 +252,11 @@ class CrossLinking2DRangeTree {
             switch t {
             case .Empty:
                 return []
-            case let .Node(leftTree, rightTree, range, sortedByY):
+            case let .Node(leftTree, rightTree, range, sortedByY, links):
                 let trimmedSearchRange = searchRange.clamped(to: range)
                 
                 if trimmedSearchRange == range {
-                    return []
+                    return Array(sortedByY[yRange])
                 } else if !trimmedSearchRange.isEmpty {
                     guard yRange.startIndex < sortedByY.count else {
                         return []
@@ -269,16 +266,16 @@ class CrossLinking2DRangeTree {
                     var rightYRange = 0..<0
                     
                     switch (leftTree, rightTree) {
-                    case let (.Node(_, _, _, leftY), .Node(_, _, _, rightY)):
-                        leftYRange = (sortedByY[yRange.startIndex].leftIndex)..<(
+                    case let (.Node(_, _, _, leftY, _), .Node(_, _, _, rightY, _)):
+                        leftYRange = Int(links[yRange.startIndex].leftIndex)..<(
                                         yRange.endIndex == sortedByY.count ?
                                         leftY.count :
-                                        sortedByY[yRange.endIndex].leftIndex
+                                        Int(links[yRange.endIndex].leftIndex)
                                      )
-                        rightYRange = (sortedByY[yRange.startIndex].rightIndex)..<(
+                        rightYRange = Int(links[yRange.startIndex].rightIndex)..<(
                             yRange.endIndex == sortedByY.count ?
                                 rightY.count :
-                                sortedByY[yRange.endIndex].rightIndex
+                                Int(links[yRange.endIndex].rightIndex)
                         )
                     default:
                         fatalError("Not good!")
@@ -291,9 +288,9 @@ class CrossLinking2DRangeTree {
         }
         
         switch tree {
-            case let .Node(_, _, _, sortedByY):
-                let bottom = sortedByY.indexOfFirst(where: { $0.point.y >= rect.minY })
-                let top = sortedByY.indexOfFirst(where: { $0.point.y > rect.maxY })
+            case let .Node(_, _, _, sortedByY, _):
+                let bottom = sortedByY.indexOfFirst(where: { $0.y >= rect.minY })
+                let top = sortedByY.indexOfFirst(where: { $0.y > rect.maxY })
                 return searchTree(tree, searchRange: l..<r, yRange: bottom..<top)
             default:
                 return []
