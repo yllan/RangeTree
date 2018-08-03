@@ -6,7 +6,7 @@
 //  Copyright © 2018 yllan. All rights reserved.
 //
 
-extension Array where Element: Comparable {
+extension Array {
     // Assuming the array is ordered like this: [F, F, F, ... T, T, T]
     // This function find the index of first element evaluates to true.
     // Time complexity: O(lgn)
