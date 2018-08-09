@@ -186,117 +186,106 @@ class ReduceMemory2DRangeTree {
 }
 
 class CrossLinking2DRangeTree {
-    
     typealias Link = (leftIndex: UInt32, rightIndex: UInt32)
+    typealias FlatTreeNode = (leftTree: UInt32, rightTree: UInt32, sortedByY: [UInt32], links: [Link])
+
+    var treeNodes: [FlatTreeNode] = []
     
-    indirect enum Tree {
-        case Empty
-        case Node(leftTree: Tree, rightTree: Tree, sortedByY: [CGPoint], links: [Link])
-        
-        static func build(range: CountableRange<Int>, array: [CGPoint]) -> Tree {
-            if range.count == 0 {
-                return Tree.Empty
-            } else if range.count == 1 {
-                return Tree.Node(leftTree: .Empty, rightTree: .Empty, sortedByY: [array[range.startIndex]], links: [])
-            } else {
-                let lRange = range.prefix(range.count / 2)
-                let rRange = range.suffix(from: lRange.endIndex)
-                
-                let lTree = build(range: lRange, array: array)
-                let rTree = build(range: rRange, array: array)
-                
-                // merging
-                var sortedByY: [CGPoint] = []
-                var links: [Link] = []
-                switch (lTree, rTree) {
-                case let (.Node(_, _, lPoints, _), .Node(_, _, rPoints, _)):
-                    var lIdx = 0, rIdx = 0, idx = 0
-                    sortedByY = Array<CGPoint>(repeating: .zero, count: lPoints.count + rPoints.count)
-                    links = Array<Link>(repeating: (0, 0), count: lPoints.count + rPoints.count)
-                    while lIdx < lPoints.count || rIdx < rPoints.count {
-                        links[idx] = (leftIndex: UInt32(lIdx), rightIndex: UInt32(rIdx))
-                        if (rIdx == rPoints.count) ||
-                           (lIdx < lPoints.count && lPoints[lIdx].y < rPoints[rIdx].y)
-                        {
-                            sortedByY[idx] = lPoints[lIdx]
-                            lIdx += 1
-                        } else {
-                            sortedByY[idx] = rPoints[rIdx]
-                            rIdx += 1
-                        }
-                        idx += 1
-                    }
-                default:
-                    fatalError("Impossible!")
-                    break
+    func buildTree(range: CountableRange<Int>, array: [CGPoint]) -> UInt32 {
+        if range.count == 0 {
+            return UInt32.max
+        } else if range.count == 1 {
+            let idx = UInt32(treeNodes.count)
+            treeNodes.append((leftTree: idx, rightTree: idx, sortedByY: [UInt32(range.startIndex)], links: []))
+            return idx
+        } else {
+            let lRange = range.prefix(range.count / 2)
+            let rRange = range.suffix(from: lRange.endIndex)
+            
+            let lTreeIdx = buildTree(range: lRange, array: array)
+            let rTreeIdx = buildTree(range: rRange, array: array)
+            
+            // merging
+            var sortedByY: [UInt32] = []
+            var links: [Link] = []
+            
+            let lPoints = treeNodes[Int(lTreeIdx)].sortedByY
+            let rPoints = treeNodes[Int(rTreeIdx)].sortedByY
+
+            var lIdx = 0, rIdx = 0, idx = 0
+            sortedByY = Array<UInt32>(repeating: 0, count: lPoints.count + rPoints.count)
+            links = Array<Link>(repeating: (0, 0), count: lPoints.count + rPoints.count)
+            
+            while lIdx < lPoints.count || rIdx < rPoints.count {
+                links[idx] = (leftIndex: UInt32(lIdx), rightIndex: UInt32(rIdx))
+                if (rIdx == rPoints.count) ||
+                    (lIdx < lPoints.count && array[Int(lPoints[lIdx])].y < array[Int(rPoints[rIdx])].y)
+                {
+                    sortedByY[idx] = lPoints[lIdx]
+                    lIdx += 1
+                } else {
+                    sortedByY[idx] = rPoints[rIdx]
+                    rIdx += 1
                 }
-                
-                return Tree.Node(leftTree: lTree, rightTree: rTree, sortedByY: sortedByY, links: links)
+                idx += 1
             }
+            let treeIdx = UInt32(treeNodes.count)
+            treeNodes.append((leftTree: lTreeIdx, rightTree: rTreeIdx, sortedByY: sortedByY, links: links))
+            return treeIdx
         }
     }
     
     let sortedByX: [CGPoint]
-    let tree: Tree
+    var tree: UInt32 = 0
     
     init(points: [CGPoint]) {
         sortedByX = points.sorted(by: { $0.x < $1.x })
-        tree = Tree.build(range: (0..<points.count), array: sortedByX)
+        tree = buildTree(range: (0..<points.count), array: sortedByX)
     }
     
     func query(rect: CGRect) -> [CGPoint] {
         let l = sortedByX.indexOfFirst(where: { $0.x >= rect.minX })
         let r = sortedByX.indexOfFirst(where: { $0.x > rect.maxX })
         
-        func searchTree(_ t: Tree, nodeRange: CountableRange<Int>, searchRange: CountableRange<Int>, yRange: CountableRange<Int>) -> [CGPoint] {
-            switch t {
-            case .Empty:
-                return []
-            case let .Node(leftTree, rightTree, sortedByY, links):
-                let trimmedSearchRange = searchRange.clamped(to: nodeRange)
+        func searchTree(_ t: UInt32, nodeRange: CountableRange<Int>, searchRange: CountableRange<Int>, yRange: CountableRange<Int>) -> [UInt32] {
+            let node = treeNodes[Int(t)]
+            let trimmedSearchRange = searchRange.clamped(to: nodeRange)
                 
-                if trimmedSearchRange == nodeRange {
-                    return Array(sortedByY[yRange])
-                } else if !trimmedSearchRange.isEmpty {
-                    guard yRange.startIndex < sortedByY.count else {
-                        return []
-                    }
-                    
-                    var leftYRange = 0..<0
-                    var rightYRange = 0..<0
-                    
-                    switch (leftTree, rightTree) {
-                    case let (.Node(_, _, leftY, _), .Node(_, _, rightY, _)):
-                        leftYRange = Int(links[yRange.startIndex].leftIndex)..<(
-                                        yRange.endIndex == sortedByY.count ?
-                                        leftY.count :
-                                        Int(links[yRange.endIndex].leftIndex)
-                                     )
-                        rightYRange = Int(links[yRange.startIndex].rightIndex)..<(
-                            yRange.endIndex == sortedByY.count ?
-                                rightY.count :
-                                Int(links[yRange.endIndex].rightIndex)
-                        )
-                    default:
-                        fatalError("Not good!")
-                    }
-                    let lRange = nodeRange.prefix(nodeRange.count / 2)
-                    let rRange = nodeRange.suffix(from: lRange.endIndex)
-                    
-                    return searchTree(leftTree, nodeRange: lRange, searchRange: trimmedSearchRange, yRange: leftYRange) + searchTree(rightTree, nodeRange: rRange, searchRange: trimmedSearchRange, yRange: rightYRange)
-                } else { // no overlap
+            if trimmedSearchRange == nodeRange {
+                return Array(node.sortedByY[yRange])
+            } else if !trimmedSearchRange.isEmpty {
+                guard yRange.startIndex < node.sortedByY.count else {
                     return []
                 }
+                    
+                let leftY = treeNodes[Int(node.leftTree)].sortedByY
+                let rightY = treeNodes[Int(node.rightTree)].sortedByY
+                
+                let leftYRange = Int(node.links[yRange.startIndex].leftIndex)..<(
+                    yRange.endIndex == node.sortedByY.count ?
+                        leftY.count :
+                        Int(node.links[yRange.endIndex].leftIndex)
+                )
+                let rightYRange = Int(node.links[yRange.startIndex].rightIndex)..<(
+                    yRange.endIndex == node.sortedByY.count ?
+                        rightY.count :
+                        Int(node.links[yRange.endIndex].rightIndex)
+                )
+                
+                let lRange = nodeRange.prefix(nodeRange.count / 2)
+                let rRange = nodeRange.suffix(from: lRange.endIndex)
+                
+                return searchTree(node.leftTree, nodeRange: lRange, searchRange: trimmedSearchRange, yRange: leftYRange) +
+                       searchTree(node.rightTree, nodeRange: rRange, searchRange: trimmedSearchRange, yRange: rightYRange)
+            } else { // no overlap
+                return []
             }
         }
         
-        switch tree {
-            case let .Node(_, _, sortedByY, _):
-                let bottom = sortedByY.indexOfFirst(where: { $0.y >= rect.minY })
-                let top = sortedByY.indexOfFirst(where: { $0.y > rect.maxY })
-                return searchTree(tree, nodeRange: 0..<sortedByX.count, searchRange: l..<r, yRange: bottom..<top)
-            default:
-                return []
-        }
+        let root = treeNodes[Int(tree)]
+        let bottom = root.sortedByY.indexOfFirst(where: { sortedByX[Int($0)].y >= rect.minY })
+        let top = root.sortedByY.indexOfFirst(where: { sortedByX[Int($0)].y > rect.maxY })
+        return searchTree(tree, nodeRange: 0..<sortedByX.count, searchRange: l..<r, yRange: bottom..<top).map({ sortedByX[Int($0)] })
+        
     }
 }
